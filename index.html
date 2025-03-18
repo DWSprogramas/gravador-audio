@@ -631,6 +631,13 @@
                     if (el.id === 'transcription') {
                         if (el.textContent.trim() !== '') {
                             processTextButton.disabled = false;
+                        } else {
+                            processTextButton.disabled = true;
+                        }
+                    }
+                });
+            });
+        });
                 
     </script>
 </body>
