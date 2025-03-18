@@ -10,11 +10,43 @@
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
+            background-color: #f8f9fa;
         }
         button {
             padding: 10px 15px;
             margin: 5px;
             cursor: pointer;
+            border-radius: 5px;
+            border: none;
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+            transition: all 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        button.active {
+            background-color: #2ecc71;
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        button#stopRecording {
+            background-color: #e74c3c;
+        }
+        button#stopRecording:disabled {
+            background-color: #95a5a6;
+        }
+        button#processText {
+            background-color: #9b59b6;
+        }
+        button#processText.active {
+            background-color: #8e44ad;
         }
         #status, #error {
             margin: 10px 0;
@@ -23,11 +55,13 @@
         }
         #status {
             background-color: #e6f7ff;
+            border-left: 4px solid #3498db;
         }
         #error {
             background-color: #ffe6e6;
             color: #cc0000;
             display: none;
+            border-left: 4px solid #e74c3c;
         }
         #transcription, #processedOutput {
             margin-top: 20px;
@@ -36,6 +70,36 @@
             border-radius: 5px;
             min-height: 100px;
             white-space: pre-wrap;
+            background-color: white;
+            transition: all 0.3s ease;
+        }
+        .editable {
+            outline: none;
+            position: relative;
+        }
+        .editable:focus {
+            border-color: #3498db;
+            box-shadow: 0 0 5px rgba(52, 152, 219, 0.5);
+        }
+        .editable:empty:before {
+            content: "Clique para editar...";
+            color: #aaa;
+            font-style: italic;
+        }
+        .editable-highlight {
+            animation: highlight 2s ease;
+        }
+        @keyframes highlight {
+            0% { background-color: #fff; }
+            25% { background-color: #e6f7ff; }
+            75% { background-color: #e6f7ff; }
+            100% { background-color: #fff; }
+        }
+        .editable-indicator {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-left: 10px;
+            font-style: italic;
         }
         .container {
             display: flex;
@@ -44,23 +108,57 @@
         }
         .api-key-container {
             margin-bottom: 15px;
-            padding: 10px;
+            padding: 15px;
             border: 1px solid #ddd;
             border-radius: 5px;
-            background-color: #f9f9f9;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
         .processing-options {
             margin: 15px 0;
-            padding: 10px;
+            padding: 15px;
             border: 1px solid #ddd;
             border-radius: 5px;
-            background-color: #f9f9f9;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        h1, h3 {
+            color: #2c3e50;
         }
         h3 {
             margin-top: 0;
+            display: flex;
+            align-items: center;
         }
         .hidden {
             display: none;
+        }
+        input[type="radio"] {
+            margin-right: 5px;
+        }
+        label {
+            cursor: pointer;
+            padding: 3px 8px;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+        }
+        label:hover {
+            background-color: #f0f0f0;
+        }
+        input[type="radio"]:checked + label {
+            background-color: #e6f7ff;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        #recordingTime {
+            font-family: monospace;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        input[type="password"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            width: 300px;
         }
     </style>
 </head>
@@ -85,26 +183,32 @@
         <div id="status">Pronto para gravar. Clique em "Iniciar Gravação".</div>
         <div id="error"></div>
         
-        <h3>Texto Transcrito:</h3>
-        <div id="transcription"></div>
+        <h3>Texto Transcrito: <span class="editable-indicator">(Editável - clique para modificar)</span></h3>
+        <div id="transcription" class="editable" contenteditable="true"></div>
         
         <div class="processing-options">
             <h3>Processamento do Texto:</h3>
-            <div>
-                <input type="radio" id="optionSummary" name="processingOption" value="summary" checked>
-                <label for="optionSummary">Resumo</label>
+            <div style="margin-bottom: 15px;">
+                <div style="display: inline-block; margin-right: 15px;">
+                    <input type="radio" id="optionSummary" name="processingOption" value="summary" checked>
+                    <label for="optionSummary">Resumo</label>
+                </div>
                 
-                <input type="radio" id="optionList" name="processingOption" value="list" style="margin-left: 15px;">
-                <label for="optionList">Lista de Tópicos</label>
+                <div style="display: inline-block; margin-right: 15px;">
+                    <input type="radio" id="optionList" name="processingOption" value="list">
+                    <label for="optionList">Lista de Tópicos</label>
+                </div>
                 
-                <input type="radio" id="optionMindMap" name="processingOption" value="mindmap" style="margin-left: 15px;">
-                <label for="optionMindMap">Mapa Mental</label>
+                <div style="display: inline-block;">
+                    <input type="radio" id="optionMindMap" name="processingOption" value="mindmap">
+                    <label for="optionMindMap">Mapa Mental</label>
+                </div>
             </div>
             <button id="processText" disabled>Processar Texto</button>
         </div>
         
-        <h3>Resultado do Processamento:</h3>
-        <div id="processedOutput"></div>
+        <h3>Resultado do Processamento: <span class="editable-indicator">(Editável - clique para modificar)</span></h3>
+        <div id="processedOutput" class="editable" contenteditable="true"></div>
     </div>
 
     <script>
@@ -229,6 +333,9 @@
                     return;
                 }
                 
+                // Visual feedback - adicionando classe active
+                startButton.classList.add('active');
+                
                 // Limpar gravações anteriores
                 audioChunks = [];
                 transcriptionDiv.textContent = "";
@@ -254,6 +361,7 @@
                     
                     // Atualizar UI
                     startButton.disabled = false;
+                    startButton.classList.remove('active');
                     stopButton.disabled = true;
                     updateStatus("Gravação finalizada. Transcrevendo áudio...");
                     
@@ -267,6 +375,14 @@
                         // Ativar o botão de processamento se temos texto
                         if (transcribedText && transcribedText.trim() !== "") {
                             processTextButton.disabled = false;
+                            
+                            // Adicionar um pequeno delay e um efeito visual para indicar que o texto pode ser editado
+                            setTimeout(() => {
+                                transcriptionDiv.classList.add('editable-highlight');
+                                setTimeout(() => {
+                                    transcriptionDiv.classList.remove('editable-highlight');
+                                }, 1000);
+                            }, 500);
                         }
                     } catch (error) {
                         showError("Erro ao transcrever áudio: " + error.message);
@@ -288,6 +404,7 @@
                 updateStatus("Gravando áudio... Clique em 'Parar Gravação' quando terminar.");
                 
             } catch (error) {
+                startButton.classList.remove('active');
                 showError("Erro ao iniciar gravação: " + error.message);
             }
         });
@@ -302,8 +419,11 @@
         
         // Processar texto transcrito
         processTextButton.addEventListener('click', async () => {
-            if (!transcribedText || transcribedText.trim() === "") {
-                showError("Não há texto para processar. Por favor, faça uma gravação primeiro.");
+            // Obter o texto atual do campo editável
+            const currentText = transcriptionDiv.textContent.trim();
+            
+            if (!currentText) {
+                showError("Não há texto para processar. Por favor, faça uma gravação primeiro ou insira um texto.");
                 return;
             }
             
@@ -312,6 +432,12 @@
                 showError("Chave API da OpenAI não encontrada. Por favor, forneça uma chave válida.");
                 return;
             }
+            
+            // Atualizar a variável transcribedText com o conteúdo possivelmente editado
+            transcribedText = currentText;
+            
+            // Visual feedback - alterando a aparência do botão
+            processTextButton.classList.add('active');
             
             // Obter a opção selecionada
             const selectedOption = document.querySelector('input[name="processingOption"]:checked').value;
@@ -322,6 +448,11 @@
                 await processTranscribedText(transcribedText, selectedOption);
             } catch (error) {
                 showError("Erro ao processar texto: " + error.message);
+            } finally {
+                // Remover a classe active após o processamento
+                setTimeout(() => {
+                    processTextButton.classList.remove('active');
+                }, 1000);
             }
         });
         
@@ -480,10 +611,27 @@
             }
         }
         
-        // Verificar se temos API Key inicialmente
+        // Verificar se temos API Key inicialmente e adicionar outros eventos
         document.addEventListener('DOMContentLoaded', () => {
             checkForAPIKey();
-        });
+            
+            // Adicionar efeito visual quando os campos editáveis são clicados
+            const editableElements = document.querySelectorAll('.editable');
+            editableElements.forEach(el => {
+                el.addEventListener('focus', () => {
+                    el.style.borderColor = '#3498db';
+                    el.style.boxShadow = '0 0 5px rgba(52, 152, 219, 0.5)';
+                });
+                
+                el.addEventListener('blur', () => {
+                    el.style.borderColor = '#ccc';
+                    el.style.boxShadow = 'none';
+                    
+                    // Se for o campo de transcrição, atualizar o estado de habilitação do botão de processar
+                    if (el.id === 'transcription') {
+                        if (el.textContent.trim() !== '') {
+                            processTextButton.disabled = false;
+                
     </script>
 </body>
 </html>
