@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gravador de Áudio para API OpenAI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #statusIndicator {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #ccc;
+            margin: 10px;
+        }
+        .recording {
+            background-color: red !important;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        #recordingTime {
+            font-size: 1.2em;
+            margin: 10px 0;
+        }
+        #resultText {
+            width: 100%;
+            height: 150px;
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        #apiKeyInput {
+            width: 100%;
+            padding: 8px;
+            margin: 10px 0;
+            box-sizing: border-box;
+        }
+        #apiKeySource {
+            margin-top: 5px;
+            font-size: 0.8em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Gravador de Áudio</h1>
+        
+        <div>
+            <label for="apiKeyInput">Chave API OpenAI:</label>
+            <input type="text" id="apiKeyInput" placeholder="sk-..." value="">
+            <div id="apiKeySource"></div>
+        </div>
+        
+        <div id="statusIndicator"></div>
+        <div id="recordingTime">00:00</div>
+        
+        <div>
+            <button id="startButton">Iniciar Gravação</button>
+            <button id="stopButton" disabled>Parar Gravação</button>
+            <button id="transcribeButton" disabled>Transcrever</button>
+        </div>
+        
+        <textarea id="resultText" readonly placeholder="O texto transcrito aparecerá aqui..."></textarea>
+        
+        <div id="status"></div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let startTime;
+        let timerInterval;
+        let audioBlob;
+        
+        const statusIndicator = document.getElementById('statusIndicator');
+        const recordingTime = document.getElementById('recordingTime');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const transcribeButton = document.getElementById('transcribeButton');
+        const resultText = document.getElementById('resultText');
+        const statusElement = document.getElementById('status');
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        const apiKeySource = document.getElementById('apiKeySource');
+        
+        // Verifica sources para a chave API ao carregar a página
+        document.addEventListener('DOMContentLoaded', function() {
+            // 1. Verificar a URL para parâmetros
+            const urlParams = new URLSearchParams(window.location.search);
+            const apiKeyParam = urlParams.get('apiKey');
+            
+            // 2. Verificar o WebViewString do Kodular (método AppInventor)
+            let kodularApiKey = null;
+            if (window.AppInventor && window.AppInventor.getWebViewString) {
+                try {
+                    const webViewData = window.AppInventor.getWebViewString();
+                    // Verificar se a string começa com "sk-" (formato típico de chave OpenAI)
+                    if (webViewData && webViewData.trim().startsWith('sk-')) {
+                        kodularApiKey = webViewData.trim();
+                    } else if (webViewData) {
+                        // Tentar parsear como JSON
+                        try {
+                            const jsonData = JSON.parse(webViewData);
+                            if (jsonData.apiKey) {
+                                kodularApiKey = jsonData.apiKey;
+                            }
+                        } catch (e) {
+                            console.log('Dados recebidos não são JSON válido:', webViewData);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Erro ao acessar WebViewString:', e);
+                }
+            }
+            
+            // 3. Tentar outros métodos de comunicação do Kodular
+            if (!kodularApiKey && window.KodularInterface && window.KodularInterface.getApiKey) {
+                try {
+                    kodularApiKey = window.KodularInterface.getApiKey();
+                } catch (e) {
+                    console.error('Erro ao acessar KodularInterface:', e);
+                }
+            }
+            
+            // Estabelecer prioridade: Kodular > URL Param > Default
+            if (kodularApiKey) {
+                apiKeyInput.value = kodularApiKey;
+                apiKeySource.textContent = "Chave recebida do Kodular";
+            } else if (apiKeyParam) {
+                apiKeyInput.value = apiKeyParam;
+                apiKeySource.textContent = "Chave recebida via URL";
+            } else {
+                apiKeySource.textContent = "Nenhuma chave detectada. Por favor, insira manualmente.";
+            }
+            
+            // Avisar o Kodular que a página foi carregada
+            sendMessageToKodular('pageLoaded', { status: 'ready' });
+        });
+        
+        startButton.addEventListener('click', startRecording);
+        stopButton.addEventListener('click', stopRecording);
+        transcribeButton.addEventListener('click', transcribeAudio);
+        
+        // Função para enviar mensagens para o Kodular (múltiplos métodos)
+        function sendMessageToKodular(action, data) {
+            try {
+                const message = JSON.stringify({
+                    action: action,
+                    ...data
+                });
+                
+                // Método 1: AppInventor WebViewString
+                if (window.AppInventor && window.AppInventor.setWebViewString) {
+                    window.AppInventor.setWebViewString(message);
+                }
+                
+                // Método 2: KodularInterface específico
+                if (window.KodularInterface) {
+                    if (action === 'transcription' && window.KodularInterface.processTranscription) {
+                        window.KodularInterface.processTranscription(data.text);
+                    } else if (window.KodularInterface.sendMessage) {
+                        window.KodularInterface.sendMessage(message);
+                    }
+                }
+                
+                // Método 3: Android interface genérica
+                if (window.Android) {
+                    if (action === 'transcription' && window.Android.processTranscription) {
+                        window.Android.processTranscription(data.text);
+                    } else if (window.Android.sendMessage) {
+                        window.Android.sendMessage(message);
+                    }
+                }
+                
+                // Método 4: iOS WebKit MessageHandlers
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.kodular) {
+                    window.webkit.messageHandlers.kodular.postMessage(message);
+                }
+                
+                console.log('Mensagem enviada para Kodular:', action, data);
+                return true;
+            } catch (e) {
+                console.error('Erro ao enviar mensagem para Kodular:', e);
+                return false;
+            }
+        }
+        
+        // Iniciar gravação
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.addEventListener('dataavailable', event => {
+                    audioChunks.push(event.data);
+                });
+                
+                mediaRecorder.addEventListener('stop', () => {
+                    audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    transcribeButton.disabled = false;
+                    
+                    // Informar ao Kodular que a gravação foi concluída
+                    sendMessageToKodular('recordingComplete', {
+                        durationMs: Date.now() - startTime
+                    });
+                });
+                
+                mediaRecorder.start();
+                
+                startTime = Date.now();
+                timerInterval = setInterval(updateRecordingTime, 1000);
+                
+                statusIndicator.classList.add('recording');
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                resultText.value = '';
+                statusElement.textContent = '';
+                
+                // Informar ao Kodular que a gravação começou
+                sendMessageToKodular('recordingStarted', {
+                    timestamp: startTime
+                });
+            } catch (error) {
+                console.error('Erro ao iniciar gravação:', error);
+                statusElement.textContent = 'Erro ao iniciar gravação: ' + error.message;
+                
+                // Informar ao Kodular sobre o erro
+                sendMessageToKodular('error', {
+                    phase: 'startRecording',
+                    message: error.message
+                });
+            }
+        }
+        
+        // Parar gravação
+        function stopRecording() {
+            mediaRecorder.stop();
+            clearInterval(timerInterval);
+            
+            // Parar todas as tracks para liberar o microfone
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            
+            statusIndicator.classList.remove('recording');
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            statusElement.textContent = 'Gravação concluída. Clique em "Transcrever" para enviar para a API.';
+            
+            // Informar ao Kodular que a gravação foi interrompida pelo usuário
+            sendMessageToKodular('recordingStopped', {
+                timestamp: Date.now(),
+                durationMs: Date.now() - startTime
+            });
+        }
+        
+        // Atualizar o timer de gravação
+        function updateRecordingTime() {
+            const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
+            const seconds = (elapsedSeconds % 60).toString().padStart(2, '0');
+            recordingTime.textContent = `${minutes}:${seconds}`;
+            
+            // Opcional: informar ao Kodular sobre o tempo de gravação
+            if (elapsedSeconds % 5 === 0) { // A cada 5 segundos
+                sendMessageToKodular('recordingProgress', {
+                    elapsedSeconds: elapsedSeconds
+                });
+            }
+        }
+        
+        // Transcrever o áudio usando a API da OpenAI
+        async function transcribeAudio() {
+            try {
+                const apiKey = apiKeyInput.value.trim();
+                if (!apiKey) {
+                    statusElement.textContent = 'Por favor, insira sua chave API da OpenAI.';
+                    sendMessageToKodular('error', {
+                        phase: 'transcription',
+                        message: 'Chave API não fornecida'
+                    });
+                    return;
+                }
+                
+                statusElement.textContent = 'Enviando áudio para transcrição...';
+                transcribeButton.disabled = true;
+                
+                // Informar ao Kodular que a transcrição começou
+                sendMessageToKodular('transcriptionStarted', {
+                    timestamp: Date.now()
+                });
+                
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'recording.wav');
+                formData.append('model', 'whisper-1');
+                
+                const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || 'Erro ao transcrever áudio');
+                }
+                
+                const data = await response.json();
+                resultText.value = data.text;
+                
+                // Enviar texto transcrito de volta para o app Kodular
+                sendMessageToKodular('transcription', {
+                    text: data.text,
+                    timestamp: Date.now()
+                });
+                
+                statusElement.textContent = 'Transcrição concluída com sucesso!';
+                transcribeButton.disabled = false;
+            } catch (error) {
+                console.error('Erro na transcrição:', error);
+                statusElement.textContent = 'Erro na transcrição: ' + error.message;
+                transcribeButton.disabled = false;
+                
+                // Informar ao Kodular sobre o erro
+                sendMessageToKodular('error', {
+                    phase: 'transcription',
+                    message: error.message
+                });
+            }
+        }
+    </script>
+</body>
+</html>
